@@ -6733,6 +6733,8 @@
       "unknown_error": "L'importazione non è riuscita"
     },
     "instanceTabBar": {
+      "chain_separator": "›",
+      "chain_via": "{{via}} › {{name}}",
       "connected": "connesso",
       "connected_refresh": "connesso · aggiornamento {{time}}",
       "connected_refreshing": "connesso · aggiornamento…",

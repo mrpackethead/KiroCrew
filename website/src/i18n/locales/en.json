@@ -4560,6 +4560,8 @@
       "unknown_error": "The import failed"
     },
     "instanceTabBar": {
+      "chain_separator": "›",
+      "chain_via": "{{via}} › {{name}}",
       "instances": "Remote crews",
       "local": "Local",
       "local_dashboard": "Local dashboard",
