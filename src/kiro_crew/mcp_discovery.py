@@ -65,6 +65,30 @@ from kiro_crew.security import redact_credentials, redact_exfiltration_urls
 
 logger = logging.getLogger(__name__)
 
+# The newest MCP revision our client probes offer in ``initialize``.
+MCP_CLIENT_PROTOCOL_VERSION = "2025-06-18"
+
+
+def downgrade_protocol_version(reply: object, sent: str) -> str | None:
+    """Newest ``data.supported`` version of a -32602 refusal of our first offer, else None."""
+    error = reply.get("error") if isinstance(reply, dict) else None
+    if sent != MCP_CLIENT_PROTOCOL_VERSION or not isinstance(error, dict):
+        return None
+    data = error.get("data") if error.get("code") == -32602 else None
+    supported = data.get("supported") if isinstance(data, dict) else None
+    if not isinstance(supported, list):
+        return None
+    # Revisions are ISO dates: only an older one is a version this client can speak.
+    return max((v for v in supported if isinstance(v, str) and v < sent), default=None)
+
+
+def negotiated_protocol_version(reply: object, sent: str) -> str:
+    """The version the server answered ``initialize`` with, else the one we sent."""
+    result = reply.get("result") if isinstance(reply, dict) else None
+    version = result.get("protocolVersion") if isinstance(result, dict) else None
+    return version if isinstance(version, str) and version else sent
+
+
 # How long to wait for MCP handshake before marking server as unreachable.
 # Configurable via dashboard.mcp_probe_timeout_secs in <config_dir>/config.json.
 _PROBE_TIMEOUT_SECS = 15  # fallback if config not loaded yet
@@ -1794,7 +1818,9 @@ async def _runtime_grant_present(mcp_url: str, name: str) -> bool | None:
     return present
 
 
-async def _probe_remote(server: McpServerInfo) -> McpServerInfo:
+async def _probe_remote(
+    server: McpServerInfo, *, protocol_version: str = MCP_CLIENT_PROTOCOL_VERSION
+) -> McpServerInfo:
     """Probe a remote Streamable HTTP MCP server via POST."""
     server.status = "probing"
     server.probed_at = time.time()
@@ -1812,7 +1838,7 @@ async def _probe_remote(server: McpServerInfo) -> McpServerInfo:
             "id": 1,
             "method": "initialize",
             "params": {
-                "protocolVersion": "2024-11-05",
+                "protocolVersion": protocol_version,
                 "capabilities": {},
                 "clientInfo": {"name": "kirocrew-probe", "version": "1.0.0"},
             },
@@ -1872,6 +1898,8 @@ async def _probe_remote(server: McpServerInfo) -> McpServerInfo:
                 # errored. Absent header = stateless server; nothing to carry.
                 mcp_session_id = resp.headers.get("Mcp-Session-Id", "")
                 data = await _read_jsonrpc_response(resp)
+                if fallback := downgrade_protocol_version(data, protocol_version):
+                    return await _probe_remote(server, protocol_version=fallback)
                 if data.get("error"):
                     server.status = "error"
                     err = data["error"]
@@ -1883,6 +1911,8 @@ async def _probe_remote(server: McpServerInfo) -> McpServerInfo:
 
             if mcp_session_id:
                 hdrs = {**hdrs, "Mcp-Session-Id": mcp_session_id}
+            negotiated = negotiated_protocol_version(data, protocol_version)
+            hdrs = {**hdrs, "MCP-Protocol-Version": negotiated}
             # The spec's lifecycle requires notifications/initialized between
             # initialize and the first request; a conforming stateful server
             # may reject tools/list without it. Notifications get 202/204 and
@@ -2374,7 +2404,7 @@ async def probe_server(
                     "id": 1,
                     "method": "initialize",
                     "params": {
-                        "protocolVersion": "2024-11-05",
+                        "protocolVersion": MCP_CLIENT_PROTOCOL_VERSION,
                         "capabilities": {},
                         "clientInfo": (
                             dict(client_info)
@@ -2400,6 +2430,12 @@ async def probe_server(
         resp = await _read_stdio_jsonrpc_response(
             proc.stdout, _get_probe_timeout(), name=server.name
         )
+        if fallback := downgrade_protocol_version(resp, MCP_CLIENT_PROTOCOL_VERSION):
+            proc.stdin.write(init_req.replace(MCP_CLIENT_PROTOCOL_VERSION, fallback, 1).encode())
+            await proc.stdin.drain()
+            resp = await _read_stdio_jsonrpc_response(
+                proc.stdout, _get_probe_timeout(), name=server.name
+            )
         if resp is None:
             server.status = "error"
             server.error = "no response"
