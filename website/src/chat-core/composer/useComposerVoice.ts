@@ -876,6 +876,11 @@ export function composerVoiceInputProps(cv: ComposerVoice) {
   return {
     voiceRecording: voiceOwned && voice.recording,
     voiceTranscribing: voiceOwned && voice.transcribing,
+    /* Whether the utterance in flight can still be called off, read from its own
+       transport rather than from the streaming setting — the setting describes
+       the next utterance, so it cannot carry a live obligation. Ownership-gated
+       like the rest: a composer answers for its own dictation only. */
+    voiceDrainCancellable: voiceOwned && voice.drainCancellable,
     /* Ungated: `startVoice` refuses on `voice.transcribing` outright, so the
        voice controls have to read the same global fact. */
     voiceTranscribeActive: voice.transcribing,
