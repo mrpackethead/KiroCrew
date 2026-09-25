@@ -1475,6 +1475,53 @@ describe('KiroPrerequisiteGate agent choice', () => {
     expect(screen.getByRole('button', { name: /Use Claude Code/ })).toBeDisabled()
   })
 
+  it('opens the picked agent\'s detail directly under its own row', async () => {
+    vi.mocked(api.kiroPrerequisite).mockResolvedValue(status())
+    vi.mocked(api.acpBackends).mockResolvedValue({
+      backends: [
+        probe(),
+        probe({ id: 'codex', policy_id: 'codex', installed: 'missing', install_command: 'npm install -g @zed-industries/codex-acp' }),
+        probe({ id: 'goose', policy_id: 'goose', installed: 'missing' }),
+      ],
+    })
+    render()
+
+    fireEvent.click(await screen.findByRole('button', { name: 'Use other coding agents' }))
+    // The row that owns the detail is the one whose radio sits in the same
+    // outline -- not whichever row happens to be last in the list.
+    const owner = () => {
+      const details = screen.getAllByTestId('other-agent-detail')
+      expect(details).toHaveLength(1)
+      return within(details[0].parentElement as HTMLElement).getByRole('radio')
+    }
+    expect(owner()).toHaveAccessibleName('Claude Code')
+
+    fireEvent.click(screen.getByRole('radio', { name: 'Codex' }))
+    expect(owner()).toHaveAccessibleName('Codex')
+    expect(owner()).toBeChecked()
+    expect(codeBlock('npm install -g @zed-industries/codex-acp')).toBeInTheDocument()
+  })
+
+  it('drops the Kiro-only footer while other coding agents are open', async () => {
+    vi.mocked(api.kiroPrerequisite).mockResolvedValue(status())
+    vi.mocked(api.acpBackends).mockResolvedValue({ backends: [probe()] })
+    render()
+
+    const toggle = await screen.findByRole('button', { name: 'Use other coding agents' })
+    expect(screen.getByText('Kiro CLI is required on the Linux gateway host.')).toBeInTheDocument()
+
+    fireEvent.click(toggle)
+    await screen.findByTestId('other-agent-detail')
+    expect(screen.queryByText('Kiro CLI is required on the Linux gateway host.')).not.toBeInTheDocument()
+    // One Check again left, and it is the open agent's own.
+    const checks = screen.getAllByRole('button', { name: 'Check again' })
+    expect(checks).toHaveLength(1)
+    expect(within(screen.getByTestId('other-agent-detail')).getByRole('button', { name: 'Check again' })).toBe(checks[0])
+
+    fireEvent.click(toggle)
+    expect(screen.getByText('Kiro CLI is required on the Linux gateway host.')).toBeInTheDocument()
+  })
+
   it('re-checks one agent through the cache-dropping endpoint and applies the answer', async () => {
     vi.mocked(api.kiroPrerequisite).mockResolvedValue(status())
     vi.mocked(api.acpBackends).mockResolvedValue({

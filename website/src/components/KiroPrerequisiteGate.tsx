@@ -1000,16 +1000,22 @@ function OtherCodingAgents({
   backends,
   loading,
   failed,
+  onOpenChange,
 }: {
   configured: string
   backends: AcpBackendProbe[]
   loading: boolean
   failed: boolean
+  /** Tells the gate whether this section is open, so its Kiro-only footer can step aside. */
+  onOpenChange?: (open: boolean) => void
 }) {
   const qc = useQueryClient()
   const others = otherCodingAgents(backends)
   const configuredOther = configured !== KIRO_BACKEND ? configured : ''
   const [open, setOpen] = useState(() => configuredOther !== '')
+  useEffect(() => {
+    onOpenChange?.(open)
+  }, [open, onOpenChange])
   const [picked, setPicked] = useState<string | null>(null)
   // Resolved every render, like Settings → Agent's highlight: the list arrives
   // after first paint, so seeding state would pin the choice to a guess.
@@ -1113,113 +1119,123 @@ function OtherCodingAgents({
             </p>
           ) : (
             <>
-              <fieldset className="m-0 space-y-2 border-none p-0">
+              <fieldset className="mx-0 space-y-2 border-none p-0">
                 <legend className="sr-only">
                   {i18nT('components.kiroPrerequisiteGate.other_agents_list_label')}
                 </legend>
                 {others.map(b => {
                   const selected = b.id === shownId
+                  // The detail opens directly under the row it describes, inside
+                  // the same outline, so it reads as that agent's panel rather
+                  // than a card detached at the foot of the list.
+                  const detailId = `other-agent-detail-${b.id}`
                   return (
-                    <label
+                    <div
                       key={b.id}
-                      className={`flex cursor-pointer items-center justify-between gap-3 rounded-lg border px-3 py-2 transition-colors focus-within:ring-2 focus-within:ring-[var(--accent)] ${
-                        selected ? 'border-accent/60 bg-accent-subtle' : 'border-border bg-card hover:bg-bg-hover'
+                      className={`overflow-hidden rounded-lg border transition-colors ${
+                        selected ? 'border-accent/60' : 'border-border'
                       }`}
                     >
-                      <span className="flex min-w-0 items-center gap-2.5">
-                        <input
-                          type="radio"
-                          name="other-coding-agent"
-                          value={b.id}
-                          checked={selected}
-                          aria-label={agentName(b)}
-                          onChange={() => setPicked(b.id)}
-                          className="h-4 w-4 shrink-0 accent-[var(--accent)]"
-                        />
-                        <Sparkles className="lucide-inline shrink-0 text-muted" aria-hidden="true" />
-                        <span className="truncate text-sm font-medium text-text-strong">{agentName(b)}</span>
-                      </span>
-                      <AgentStatusBadge probe={b} />
-                    </label>
+                      <label
+                        className={`flex cursor-pointer items-center justify-between gap-3 px-3 py-2 transition-colors focus-within:ring-2 focus-within:ring-inset focus-within:ring-[var(--accent)] ${
+                          selected ? 'bg-accent-subtle' : 'bg-card hover:bg-bg-hover'
+                        }`}
+                      >
+                        <span className="flex min-w-0 items-center gap-2.5">
+                          <input
+                            type="radio"
+                            name="other-coding-agent"
+                            value={b.id}
+                            checked={selected}
+                            aria-label={agentName(b)}
+                            aria-controls={selected ? detailId : undefined}
+                            onChange={() => setPicked(b.id)}
+                            className="h-4 w-4 shrink-0 accent-[var(--accent)]"
+                          />
+                          <Sparkles className="lucide-inline shrink-0 text-muted" aria-hidden="true" />
+                          <span className="truncate text-sm font-medium text-text-strong">{agentName(b)}</span>
+                        </span>
+                        <AgentStatusBadge probe={b} />
+                      </label>
+                      {selected && shown && (
+                        <div id={detailId} className="space-y-3 border-t border-accent/30 bg-card p-4" data-testid="other-agent-detail">
+                          {shown.installed === 'missing' ? (
+                            <>
+                              <p className="text-[13px] font-medium text-text">
+                                {i18nT('components.kiroPrerequisiteGate.agent_install_on_host', { name })}
+                              </p>
+                              {shown.install_command ? (
+                                <CopyCommand>
+                                  <code>{shown.install_command}</code>
+                                </CopyCommand>
+                              ) : null}
+                              {shown.missing_components.length > 0 && (
+                                <p className="text-[12px] text-muted">
+                                  {i18nT('components.kiroPrerequisiteGate.agent_missing_components', {
+                                    components: shown.missing_components.join(', '),
+                                  })}
+                                </p>
+                              )}
+                              <p className="text-[12px] leading-relaxed text-muted">
+                                {i18nT('components.kiroPrerequisiteGate.agent_install_then_check', { name })}
+                              </p>
+                            </>
+                          ) : shown.restart_required ? (
+                            <p className="text-[13px] leading-relaxed text-text">
+                              {i18nT('components.kiroPrerequisiteGate.agent_restart_required_detail', { name })}
+                            </p>
+                          ) : shown.installed === 'unknown' ? (
+                            <p className="text-[13px] leading-relaxed text-text">
+                              {i18nT('components.kiroPrerequisiteGate.agent_unverified_detail', { name })}
+                            </p>
+                          ) : (
+                            <p className="text-[13px] leading-relaxed text-text">
+                              {i18nT('components.kiroPrerequisiteGate.agent_ready_to_use', { name })}
+                            </p>
+                          )}
+                          {/* Server-owned sentence, rendered verbatim like Settings → Agent
+                              does: it names this harness's own sign-in, which Kiro Crew
+                              neither performs nor can check. */}
+                          {shown.auth?.signs_in_separately && shown.auth.sign_in_remedy ? (
+                            <p className="text-[12px] leading-relaxed text-muted">{shown.auth.sign_in_remedy}</p>
+                          ) : null}
+                          <div className="flex flex-wrap items-center gap-2 pt-1">
+                            <SendBtn
+                              type="button"
+                              className="inline-flex items-center gap-1.5"
+                              disabled={busy || !backendUsable(shown)}
+                              onClick={() => switchMut.mutate(shown.id)}
+                            >
+                              {switchMut.isPending && switchMut.variables === shown.id
+                                ? i18nT('components.kiroPrerequisiteGate.switching_agent')
+                                : i18nT('components.kiroPrerequisiteGate.use_agent', { name })}
+                              <ArrowRight className="lucide-inline" />
+                            </SendBtn>
+                            <Btn
+                              type="button"
+                              className="h-9 rounded-lg px-3"
+                              disabled={busy}
+                              onClick={() => recheckMut.mutate(shown.id)}
+                            >
+                              <RefreshCw className={`lucide-inline ${recheckMut.isPending ? 'animate-spin' : ''}`} />
+                              {i18nT('components.kiroPrerequisiteGate.check_again')}
+                            </Btn>
+                          </div>
+                          <ErrorNotice
+                            className="text-xs"
+                            message={
+                              recheckMut.isError && recheckMut.variables === shown.id
+                                ? i18nT('components.kiroPrerequisiteGate.agent_recheck_failed', { name })
+                                : null
+                            }
+                            testId="other-agent-recheck-error"
+                          />
+                        </div>
+                      )}
+                    </div>
                   )
                 })}
               </fieldset>
-
-              {shown && (
-                <div className="space-y-3 rounded-lg border border-border bg-card p-4" data-testid="other-agent-detail">
-                  {shown.installed === 'missing' ? (
-                    <>
-                      <p className="text-[13px] font-medium text-text">
-                        {i18nT('components.kiroPrerequisiteGate.agent_install_on_host', { name })}
-                      </p>
-                      {shown.install_command ? (
-                        <CopyCommand>
-                          <code>{shown.install_command}</code>
-                        </CopyCommand>
-                      ) : null}
-                      {shown.missing_components.length > 0 && (
-                        <p className="text-[12px] text-muted">
-                          {i18nT('components.kiroPrerequisiteGate.agent_missing_components', {
-                            components: shown.missing_components.join(', '),
-                          })}
-                        </p>
-                      )}
-                      <p className="text-[12px] leading-relaxed text-muted">
-                        {i18nT('components.kiroPrerequisiteGate.agent_install_then_check', { name })}
-                      </p>
-                    </>
-                  ) : shown.restart_required ? (
-                    <p className="text-[13px] leading-relaxed text-text">
-                      {i18nT('components.kiroPrerequisiteGate.agent_restart_required_detail', { name })}
-                    </p>
-                  ) : shown.installed === 'unknown' ? (
-                    <p className="text-[13px] leading-relaxed text-text">
-                      {i18nT('components.kiroPrerequisiteGate.agent_unverified_detail', { name })}
-                    </p>
-                  ) : (
-                    <p className="text-[13px] leading-relaxed text-text">
-                      {i18nT('components.kiroPrerequisiteGate.agent_ready_to_use', { name })}
-                    </p>
-                  )}
-                  {/* Server-owned sentence, rendered verbatim like Settings → Agent
-                      does: it names this harness's own sign-in, which Kiro Crew
-                      neither performs nor can check. */}
-                  {shown.auth?.signs_in_separately && shown.auth.sign_in_remedy ? (
-                    <p className="text-[12px] leading-relaxed text-muted">{shown.auth.sign_in_remedy}</p>
-                  ) : null}
-                  <div className="flex flex-wrap items-center gap-2 pt-1">
-                    <SendBtn
-                      type="button"
-                      className="inline-flex items-center gap-1.5"
-                      disabled={busy || !backendUsable(shown)}
-                      onClick={() => switchMut.mutate(shown.id)}
-                    >
-                      {switchMut.isPending && switchMut.variables === shown.id
-                        ? i18nT('components.kiroPrerequisiteGate.switching_agent')
-                        : i18nT('components.kiroPrerequisiteGate.use_agent', { name })}
-                      <ArrowRight className="lucide-inline" />
-                    </SendBtn>
-                    <Btn
-                      type="button"
-                      className="h-9 rounded-lg px-3"
-                      disabled={busy}
-                      onClick={() => recheckMut.mutate(shown.id)}
-                    >
-                      <RefreshCw className={`lucide-inline ${recheckMut.isPending ? 'animate-spin' : ''}`} />
-                      {i18nT('components.kiroPrerequisiteGate.check_again')}
-                    </Btn>
-                  </div>
-                  <ErrorNotice
-                    className="text-xs"
-                    message={
-                      recheckMut.isError && recheckMut.variables === shown.id
-                        ? i18nT('components.kiroPrerequisiteGate.agent_recheck_failed', { name })
-                        : null
-                    }
-                    testId="other-agent-recheck-error"
-                  />
-                </div>
-              )}
               <p className="text-[12px] leading-relaxed text-muted">
                 {i18nT('components.kiroPrerequisiteGate.switch_agent_later_in_settings')}
               </p>
@@ -1238,6 +1254,11 @@ export default function KiroPrerequisiteGate({ children }: { children: ReactNode
   // background poll below reads latched state for free. A user-driven Refresh
   // must still hit the host, so it arms this flag for exactly one fetch.
   const forceProbe = useRef(false)
+  // Whether "Use other coding agents" is open. While it is, the footer's
+  // "Kiro CLI is required" line and its Kiro-only Check again are wrong for what
+  // the user is looking at -- the open agent's own panel carries its install
+  // command and Check again -- so the footer steps aside.
+  const [otherAgentsOpen, setOtherAgentsOpen] = useState(false)
   const statusQuery = useQuery({
     queryKey: QUERY_KEY,
     queryFn: () => {
@@ -1616,27 +1637,30 @@ export default function KiroPrerequisiteGate({ children }: { children: ReactNode
             backends={backendsQuery.data?.backends ?? []}
             loading={backendsQuery.isPending && backendsQuery.fetchStatus !== 'idle'}
             failed={backendsQuery.isError}
+            onOpenChange={setOtherAgentsOpen}
           />
 
-          <div className="flex items-center justify-between gap-4 border-t border-border pt-5">
-            {/* Installed: the state now leads the card, so the footer stays
-                empty rather than repeating it. The element is kept so Check
-                again stays right-aligned. */}
-            <p className="text-[13px] text-muted" aria-live="polite">
-              {status.installed
-                ? null
-                : i18nT('components.kiroPrerequisiteGate.kiro_cli_is_required_on_the_gateway_host', { platform })}
-            </p>
-            <SendBtn
-              type="button"
-              className="inline-flex items-center gap-1.5"
-              disabled={statusQuery.isFetching}
-              onClick={retryStatus}
-            >
-              <RefreshCw className={`lucide-inline ${statusQuery.isFetching ? 'animate-spin' : ''}`} />
-              {i18nT('components.kiroPrerequisiteGate.check_again')}
-            </SendBtn>
-          </div>
+          {!otherAgentsOpen && (
+            <div className="flex items-center justify-between gap-4 border-t border-border pt-5">
+              {/* Installed: the state now leads the card, so the footer stays
+                  empty rather than repeating it. The element is kept so Check
+                  again stays right-aligned. */}
+              <p className="text-[13px] text-muted" aria-live="polite">
+                {status.installed
+                  ? null
+                  : i18nT('components.kiroPrerequisiteGate.kiro_cli_is_required_on_the_gateway_host', { platform })}
+              </p>
+              <SendBtn
+                type="button"
+                className="inline-flex items-center gap-1.5"
+                disabled={statusQuery.isFetching}
+                onClick={retryStatus}
+              >
+                <RefreshCw className={`lucide-inline ${statusQuery.isFetching ? 'animate-spin' : ''}`} />
+                {i18nT('components.kiroPrerequisiteGate.check_again')}
+              </SendBtn>
+            </div>
+          )}
         </>
     </SetupShell>
   )
