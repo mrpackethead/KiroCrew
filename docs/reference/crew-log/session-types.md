@@ -1328,11 +1328,13 @@ is derived from the entry's own `time` and is not repeated in `data`.
 **Reader hint** — Read the fold for the member's own DM slot, then select the record
 under the asking crew's `crew_key`; an empty `template` is the fold's way of saying
 this crew has published nothing. Do not key on the slug alone — on a collided slug
-that serves whichever crew published last to both of them. That selected record
-carries the slot's `owners_omitted` count as well as its own `history_omitted`, so an
-empty record read there can be told apart from a crew whose record the owner bound
-evicted; a count only the top level held would be unreachable from the record this
-hint names.
+that serves whichever crew published last to both of them. Finding NO record under
+your own `crew_key` is the case to handle, because eviction deletes the owner's entry
+rather than emptying it. The fold's top-level `owners_omitted` is what you read then,
+and its guarantee is one-sided: `0` is decisive and means this slot evicted nobody, so
+your crew never published here; any non-zero value says only that the slot truncated
+and does NOT identify whom, since the count rises on the eviction of any owner without
+reference to your key. Each per-owner record repeats the same slot-wide count.
 
 **Since** — the change that gave the member panel a crew-log record beside its file.
 
