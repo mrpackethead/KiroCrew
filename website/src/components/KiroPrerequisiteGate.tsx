@@ -1000,22 +1000,28 @@ function OtherCodingAgents({
   backends,
   loading,
   failed,
-  onOpenChange,
+  onShowingAgentsChange,
 }: {
   configured: string
   backends: AcpBackendProbe[]
   loading: boolean
   failed: boolean
-  /** Tells the gate whether this section is open, so its Kiro-only footer can step aside. */
-  onOpenChange?: (open: boolean) => void
+  /**
+   * Tells the gate whether this section is open AND listing agents, so its
+   * Kiro-only footer can step aside. An open section with nothing to pick
+   * (still checking, check failed, none offered) leaves the footer in place:
+   * Kiro CLI is then the only path, and the footer says so.
+   */
+  onShowingAgentsChange?: (showing: boolean) => void
 }) {
   const qc = useQueryClient()
   const others = otherCodingAgents(backends)
   const configuredOther = configured !== KIRO_BACKEND ? configured : ''
   const [open, setOpen] = useState(() => configuredOther !== '')
+  const showingAgents = open && others.length > 0
   useEffect(() => {
-    onOpenChange?.(open)
-  }, [open, onOpenChange])
+    onShowingAgentsChange?.(showingAgents)
+  }, [showingAgents, onShowingAgentsChange])
   const [picked, setPicked] = useState<string | null>(null)
   // Resolved every render, like Settings → Agent's highlight: the list arrives
   // after first paint, so seeding state would pin the choice to a guess.
@@ -1132,12 +1138,15 @@ function OtherCodingAgents({
                   return (
                     <div
                       key={b.id}
-                      className={`overflow-hidden rounded-lg border transition-colors ${
+                      // The focus ring lives on this rounded outline, keyed to the
+                      // radio alone: drawn inset on the square row inside it, the
+                      // ring's corners were clipped by the rounding.
+                      className={`overflow-hidden rounded-lg border transition-colors has-[input:focus-visible]:ring-2 has-[input:focus-visible]:ring-[var(--accent)] ${
                         selected ? 'border-accent/60' : 'border-border'
                       }`}
                     >
                       <label
-                        className={`flex cursor-pointer items-center justify-between gap-3 px-3 py-2 transition-colors focus-within:ring-2 focus-within:ring-inset focus-within:ring-[var(--accent)] ${
+                        className={`flex cursor-pointer items-center justify-between gap-3 px-3 py-2 transition-colors ${
                           selected ? 'bg-accent-subtle' : 'bg-card hover:bg-bg-hover'
                         }`}
                       >
@@ -1150,7 +1159,7 @@ function OtherCodingAgents({
                             aria-label={agentName(b)}
                             aria-controls={selected ? detailId : undefined}
                             onChange={() => setPicked(b.id)}
-                            className="h-4 w-4 shrink-0 accent-[var(--accent)]"
+                            className="h-4 w-4 shrink-0 accent-[var(--accent)] focus-visible:outline-none"
                           />
                           <Sparkles className="lucide-inline shrink-0 text-muted" aria-hidden="true" />
                           <span className="truncate text-sm font-medium text-text-strong">{agentName(b)}</span>
@@ -1254,7 +1263,7 @@ export default function KiroPrerequisiteGate({ children }: { children: ReactNode
   // background poll below reads latched state for free. A user-driven Refresh
   // must still hit the host, so it arms this flag for exactly one fetch.
   const forceProbe = useRef(false)
-  // Whether "Use other coding agents" is open. While it is, the footer's
+  // Whether "Use other coding agents" is open with agents listed. While it is, the footer's
   // "Kiro CLI is required" line and its Kiro-only Check again are wrong for what
   // the user is looking at -- the open agent's own panel carries its install
   // command and Check again -- so the footer steps aside.
@@ -1637,7 +1646,7 @@ export default function KiroPrerequisiteGate({ children }: { children: ReactNode
             backends={backendsQuery.data?.backends ?? []}
             loading={backendsQuery.isPending && backendsQuery.fetchStatus !== 'idle'}
             failed={backendsQuery.isError}
-            onOpenChange={setOtherAgentsOpen}
+            onShowingAgentsChange={setOtherAgentsOpen}
           />
 
           {!otherAgentsOpen && (

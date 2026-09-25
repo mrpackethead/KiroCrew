@@ -1522,6 +1522,18 @@ describe('KiroPrerequisiteGate agent choice', () => {
     expect(screen.getByText('Kiro CLI is required on the Linux gateway host.')).toBeInTheDocument()
   })
 
+  it('keeps the Kiro footer when the open section has no agent to pick', async () => {
+    // A failed check leaves Kiro CLI as the only path, so its footer stays.
+    vi.mocked(api.kiroPrerequisite).mockResolvedValue(status())
+    vi.mocked(api.acpBackends).mockRejectedValue(new Error('boom'))
+    render()
+
+    fireEvent.click(await screen.findByRole('button', { name: 'Use other coding agents' }))
+    await screen.findByText(/Could not check the other agents/)
+    expect(screen.getByText('Kiro CLI is required on the Linux gateway host.')).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Check again' })).toBeInTheDocument()
+  })
+
   it('re-checks one agent through the cache-dropping endpoint and applies the answer', async () => {
     vi.mocked(api.kiroPrerequisite).mockResolvedValue(status())
     vi.mocked(api.acpBackends).mockResolvedValue({
