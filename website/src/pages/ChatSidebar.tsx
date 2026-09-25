@@ -7207,7 +7207,12 @@ function ChatSidebar({
   const renderColumnFolder = (folder: ChatFolder, columnId: string, colSlotKeys: Set<string>, dragHandleProps?: React.HTMLAttributes<HTMLElement>, forceCollapsed?: boolean): React.ReactNode => {
     const childFolders = folders.filter(f => f.parent_id === folder.id).sort(bySidebarOrder)
     const { rows: childSlots, navScope: folderLaneScope, container: folderHoldContainer } = heldLane(filteredSlots.filter(s => colSlotKeys.has(sessionRowIdentity(s)) && localSlotFolder(s, slotFolders) === folder.id), columnId, `board:${columnId}:folder:${folder.id}`)
-    const deepChildren = childFolders
+    // A nested folder the person unchecked drops out of the recursion, so neither its
+    // header nor anything under it renders. Checking the folder's OWN id is enough:
+    // dropping it here takes its descendants with it, the same way the tree's block
+    // removal does. Its sessions are already gone from `colSlotKeys`; without this the
+    // column would still draw the header of a folder the person asked not to see.
+    const deepChildren = childFolders.filter(f => !isFolderFilteredOut(f))
     // Same opt-in as the tree (see the note in renderFolderBlock): only when the
     // setting is on does a column copy holding nothing lose its body, and with it
     // the collapse state it no longer has anything to remember.
@@ -9486,10 +9491,15 @@ function ChatSidebar({
             {flatSlots.length === 0 && (
               <div className="px-3 py-4 text-[12px] text-muted">{i18nT('pages.chatSidebar.no_sessions_match')}</div>
             )}
-            {flatSlots.length > 0 && lineage != null && lineage.children.size === 0 && (
+            {flatSlots.length > 0 && lineage != null && lineage.children.size === 0 && allHiddenFolders.length === 0 && (
               // Not an error state: the crew log may be off, or nothing has opened
               // anything yet. The lane still shows every session -- it just has no
               // nesting to show, and says so instead of looking broken.
+              //
+              // Withheld while this lane is concealing a folder, because then the note
+              // cannot be read as intended: the rows above it are live sessions, and the
+              // reveal row immediately below already says how many folders are hidden,
+              // which is the actual reason there is no nesting left to draw.
               <div className="px-3 py-2 text-[11px] text-muted select-none" data-testid="conductor-lane-empty-note">
                 {i18nT('pages.chatSidebar.no_conductor_sessions_yet')}
               </div>
@@ -9742,7 +9752,13 @@ function ChatSidebar({
           )}
           <div className="flex-1 overflow-x-auto overflow-y-hidden flex gap-2 p-2" data-testid="column-strip">
             {orderedColumns.map((col, colIdx) => {
-              const colSlots = filteredSlots.filter(s => !isPeerRow(s) && columnMatches(col, s))
+              // `isRowFolderHidden` here rather than at the render sites below, because
+              // this one population feeds all of them: the flat-board rows, every folder
+              // block's body through `colSlotKeys`, each block's aggregate count, and the
+              // "no sessions" notice. The board lane has no reveal row (a column has no
+              // folder header for one to hang from), so the hide is absolute here and the
+              // way back is re-checking the folder in the filter menu.
+              const colSlots = filteredSlots.filter(s => !isPeerRow(s) && columnMatches(col, s) && !isRowFolderHidden(s))
               const colTags = col.tag_ids.map(tid => tagById[tid]).filter(Boolean) as ChatTag[]
               const laneDef = col.source === 'state' ? SESSION_LANES.find(l => l.key === col.state_key) : undefined
               // Only a single-status-tag column can accept a card: dropping onto a
@@ -9824,7 +9840,7 @@ function ChatSidebar({
                         </span>
                       )}
                     </div>
-                    <span className="text-[11px] text-muted shrink-0">{colSlots.length}</span>
+                    <span data-testid={`column-count-${col.id}`} className="text-[11px] text-muted shrink-0">{colSlots.length}</span>
                     <button type="button" data-testid={`column-new-folder-${col.id}`} className="text-muted hover:text-accent bg-transparent border-none cursor-pointer shrink-0 p-[2px]" title={i18nT('pages.chatSidebar.new_folder')} aria-label={i18nT('pages.chatSidebar.new_folder')} onClick={() => { setFolderModal({ mode: 'create', parentId: '' }) }}><FolderPlus size={12} /></button>
                     {!laneDef && <button type="button" data-testid={`column-edit-${col.id}`} className="text-muted hover:text-accent bg-transparent border-none cursor-pointer shrink-0 p-[2px]" title={i18nT('pages.chatSidebar.filter_manage_tags')} aria-label={i18nT('pages.chatSidebar.filter_manage_tags')} onClick={() => setColumnEditId(columnEditId === col.id ? null : col.id)}><TagIcon size={12} /></button>}
                     <button
@@ -9940,7 +9956,13 @@ function ChatSidebar({
                       // order. Cross-lane card drag (the column onDrop above) is
                       // untouched; only folder rendering (and with it folder
                       // reorder/drop, which need folder headers) goes away.
-                      const relevantFolders = flatView ? [] : rootFolders
+                      // A folder the person unchecked in the filter menu drops out here
+                      // for the same reason the tree drops it: the hide is a statement
+                      // about the folder, not about one lane, so every lane that renders
+                      // folder blocks answers to it. `isFolderHidden` is deliberately NOT
+                      // applied -- a board column renders an empty folder header on
+                      // purpose, as something to drop onto.
+                      const relevantFolders = flatView ? [] : rootFolders.filter(f => !isFolderFilteredOut(f))
                       const { rows: ungrouped, navScope: colLaneScope, container: colHoldContainer } = heldLane(flatView
                         ? colSlots
                         : colSlots.filter(s => {
