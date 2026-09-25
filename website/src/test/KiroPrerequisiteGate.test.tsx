@@ -125,7 +125,7 @@ describe('KiroPrerequisiteGate', () => {
       <KiroPrerequisiteGate><div>Dashboard loaded</div></KiroPrerequisiteGate>,
     )
 
-    await screen.findByText(/Kiro Crew uses Kiro CLI/)
+    await screen.findByText(/Get a coding agent running on the/)
     // Cold mount has no cached status, so it reads the latch.
     expect(vi.mocked(api.kiroPrerequisite).mock.calls[0][0]).toBe(false)
 
@@ -172,7 +172,7 @@ describe('KiroPrerequisiteGate', () => {
       <KiroPrerequisiteGate><div>Dashboard loaded</div></KiroPrerequisiteGate>,
     )
 
-    expect(await screen.findByText(/Kiro Crew uses Kiro CLI/)).toBeInTheDocument()
+    expect(await screen.findByText(/Get a coding agent running on the/)).toBeInTheDocument()
     fireEvent.click(screen.getByRole('button', { name: 'Check again' }))
     expect(await screen.findByText('Dashboard loaded')).toBeInTheDocument()
   })
@@ -204,7 +204,7 @@ describe('KiroPrerequisiteGate', () => {
       <KiroPrerequisiteGate><div>Dashboard loaded</div></KiroPrerequisiteGate>,
     )
 
-    expect(await screen.findByText(/Kiro Crew uses Kiro CLI/)).toBeInTheDocument()
+    expect(await screen.findByText(/Get a coding agent running on the/)).toBeInTheDocument()
     expect((await screen.findAllByText(/Windows gateway host/)).length).toBeGreaterThan(0)
 
     const setupLink = screen.getByRole('link', { name: /Open Kiro CLI setup/ })
@@ -1502,36 +1502,52 @@ describe('KiroPrerequisiteGate agent choice', () => {
     expect(codeBlock('npm install -g @zed-industries/codex-acp')).toBeInTheDocument()
   })
 
-  it('drops the Kiro-only footer while other coding agents are open', async () => {
+  it('puts each Check again inside the card it re-checks, with no page footer', async () => {
     vi.mocked(api.kiroPrerequisite).mockResolvedValue(status())
-    vi.mocked(api.acpBackends).mockResolvedValue({ backends: [probe()] })
+    vi.mocked(api.acpBackends).mockResolvedValue({ backends: [probe({ installed: 'missing' })] })
     render()
 
-    const toggle = await screen.findByRole('button', { name: 'Use other coding agents' })
-    expect(screen.getByText('Kiro CLI is required on the Linux gateway host.')).toBeInTheDocument()
+    const kiroCard = (await screen.findByRole('heading', { name: 'Get Kiro CLI' })).closest('div.card-glow') as HTMLElement
+    // The footer line read as Kiro-only once other agents were on screen.
+    expect(screen.queryByText(/is required on the Linux gateway host/)).not.toBeInTheDocument()
+    expect(screen.getAllByRole('button', { name: 'Check again' })).toEqual([
+      within(kiroCard).getByRole('button', { name: 'Check again' }),
+    ])
 
-    fireEvent.click(toggle)
-    await screen.findByTestId('other-agent-detail')
-    expect(screen.queryByText('Kiro CLI is required on the Linux gateway host.')).not.toBeInTheDocument()
-    // One Check again left, and it is the open agent's own.
-    const checks = screen.getAllByRole('button', { name: 'Check again' })
-    expect(checks).toHaveLength(1)
-    expect(within(screen.getByTestId('other-agent-detail')).getByRole('button', { name: 'Check again' })).toBe(checks[0])
-
-    fireEvent.click(toggle)
-    expect(screen.getByText('Kiro CLI is required on the Linux gateway host.')).toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: 'Use other coding agents' }))
+    const detail = await screen.findByTestId('other-agent-detail')
+    // One per card: the Kiro card's and the open agent's, nothing outside them.
+    expect(screen.getAllByRole('button', { name: 'Check again' })).toEqual([
+      within(kiroCard).getByRole('button', { name: 'Check again' }),
+      within(detail).getByRole('button', { name: 'Check again' }),
+    ])
   })
 
-  it('keeps the Kiro footer when the open section has no agent to pick', async () => {
-    // A failed check leaves Kiro CLI as the only path, so its footer stays.
+  it('offers no Check again on an agent that is installed and ready', async () => {
     vi.mocked(api.kiroPrerequisite).mockResolvedValue(status())
-    vi.mocked(api.acpBackends).mockRejectedValue(new Error('boom'))
+    vi.mocked(api.acpBackends).mockResolvedValue({
+      backends: [probe(), probe({ id: 'pi', policy_id: 'pi', installed: 'unknown' })],
+    })
     render()
 
     fireEvent.click(await screen.findByRole('button', { name: 'Use other coding agents' }))
-    await screen.findByText(/Could not check the other agents/)
-    expect(screen.getByText('Kiro CLI is required on the Linux gateway host.')).toBeInTheDocument()
-    expect(screen.getByRole('button', { name: 'Check again' })).toBeInTheDocument()
+    const ready = await screen.findByTestId('other-agent-detail')
+    expect(within(ready).getByText('Claude Code is installed and ready to use.')).toBeInTheDocument()
+    expect(within(ready).getByRole('button', { name: /Use Claude Code/ })).toBeEnabled()
+    expect(within(ready).queryByRole('button', { name: 'Check again' })).not.toBeInTheDocument()
+
+    // Not verified is still something a re-check can settle, so it keeps one.
+    fireEvent.click(screen.getByRole('radio', { name: 'Pi' }))
+    expect(within(screen.getByTestId('other-agent-detail')).getByRole('button', { name: 'Check again' })).toBeInTheDocument()
+  })
+
+  it('names no single agent as the engine in the intro', async () => {
+    vi.mocked(api.kiroPrerequisite).mockResolvedValue(status())
+    render()
+
+    expect(await screen.findByText(/Get a coding agent running on the/)).toBeInTheDocument()
+    expect(screen.getByText('Linux gateway host').tagName).toBe('STRONG')
+    expect(screen.queryByText(/agent engine/)).not.toBeInTheDocument()
   })
 
   it('re-checks one agent through the cache-dropping endpoint and applies the answer', async () => {

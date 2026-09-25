@@ -34,6 +34,7 @@ import { useScrollEdgesY } from '../hooks/useScrollEdges'
 import { Badge, Btn, Card, SendBtn } from './ui'
 import ErrorNotice from './ErrorNotice'
 
+import { Trans } from 'react-i18next'
 import { i18nT } from '../i18n/t'
 const QUERY_KEY = ['kiro-prerequisite'] as const
 
@@ -902,6 +903,11 @@ export function backendUsable(probe: AcpBackendProbe | undefined): boolean {
   return probe.installed !== 'missing' && !probe.restart_required
 }
 
+/** Installed, confirmed and runnable now -- the one state with nothing left to check. */
+function agentReady(probe: AcpBackendProbe): boolean {
+  return probe.installed === 'installed' && !probe.restart_required && probe.selectable !== false
+}
+
 /** The backends this screen offers as alternatives to Kiro CLI. */
 export function otherCodingAgents(backends: AcpBackendProbe[]): AcpBackendProbe[] {
   return backends.filter(
@@ -1000,28 +1006,16 @@ function OtherCodingAgents({
   backends,
   loading,
   failed,
-  onShowingAgentsChange,
 }: {
   configured: string
   backends: AcpBackendProbe[]
   loading: boolean
   failed: boolean
-  /**
-   * Tells the gate whether this section is open AND listing agents, so its
-   * Kiro-only footer can step aside. An open section with nothing to pick
-   * (still checking, check failed, none offered) leaves the footer in place:
-   * Kiro CLI is then the only path, and the footer says so.
-   */
-  onShowingAgentsChange?: (showing: boolean) => void
 }) {
   const qc = useQueryClient()
   const others = otherCodingAgents(backends)
   const configuredOther = configured !== KIRO_BACKEND ? configured : ''
   const [open, setOpen] = useState(() => configuredOther !== '')
-  const showingAgents = open && others.length > 0
-  useEffect(() => {
-    onShowingAgentsChange?.(showingAgents)
-  }, [showingAgents, onShowingAgentsChange])
   const [picked, setPicked] = useState<string | null>(null)
   // Resolved every render, like Settings → Agent's highlight: the list arrives
   // after first paint, so seeding state would pin the choice to a guess.
@@ -1220,15 +1214,19 @@ function OtherCodingAgents({
                                 : i18nT('components.kiroPrerequisiteGate.use_agent', { name })}
                               <ArrowRight className="lucide-inline" />
                             </SendBtn>
-                            <Btn
-                              type="button"
-                              className="h-9 rounded-lg px-3"
-                              disabled={busy}
-                              onClick={() => recheckMut.mutate(shown.id)}
-                            >
-                              <RefreshCw className={`lucide-inline ${recheckMut.isPending ? 'animate-spin' : ''}`} />
-                              {i18nT('components.kiroPrerequisiteGate.check_again')}
-                            </Btn>
+                            {/* Nothing to re-check on an agent that is installed
+                                and ready: the only action left is to use it. */}
+                            {!agentReady(shown) && (
+                              <Btn
+                                type="button"
+                                className="h-9 rounded-lg px-3"
+                                disabled={busy}
+                                onClick={() => recheckMut.mutate(shown.id)}
+                              >
+                                <RefreshCw className={`lucide-inline ${recheckMut.isPending ? 'animate-spin' : ''}`} />
+                                {i18nT('components.kiroPrerequisiteGate.check_again')}
+                              </Btn>
+                            )}
                           </div>
                           <ErrorNotice
                             className="text-xs"
@@ -1263,11 +1261,6 @@ export default function KiroPrerequisiteGate({ children }: { children: ReactNode
   // background poll below reads latched state for free. A user-driven Refresh
   // must still hit the host, so it arms this flag for exactly one fetch.
   const forceProbe = useRef(false)
-  // Whether "Use other coding agents" is open with agents listed. While it is, the footer's
-  // "Kiro CLI is required" line and its Kiro-only Check again are wrong for what
-  // the user is looking at -- the open agent's own panel carries its install
-  // command and Check again -- so the footer steps aside.
-  const [otherAgentsOpen, setOtherAgentsOpen] = useState(false)
   const statusQuery = useQuery({
     queryKey: QUERY_KEY,
     queryFn: () => {
@@ -1548,8 +1541,13 @@ export default function KiroPrerequisiteGate({ children }: { children: ReactNode
             </div>
             <h1 className="text-3xl font-bold tracking-tight text-text-strong">{i18nT('components.kiroPrerequisiteGate.set_up_kiro')}</h1>
             <p className="mt-2 max-w-xl text-sm leading-relaxed text-muted">
-              {i18nT('components.kiroPrerequisiteGate.kiro_crew_uses_kiro_cli_as_its_agent_engine_comp')}{' '}
-              <strong className="font-semibold text-text">{platform} {i18nT('components.kiroPrerequisiteGate.gateway_host')}</strong>{i18nT('components.kiroPrerequisiteGate.then_the_dashboard_will_open_automatically')}
+              {/* One sentence in one key, so each language orders the host
+                  phrase where its grammar puts it. */}
+              <Trans
+                i18nKey="components.kiroPrerequisiteGate.setup_intro"
+                values={{ platform }}
+                components={[<strong key="host" className="font-semibold text-text" />]}
+              />
             </p>
           </div>
 
@@ -1639,26 +1637,11 @@ export default function KiroPrerequisiteGate({ children }: { children: ReactNode
                 </p>
               </div>
             )}
-          </Card>
-
-          <OtherCodingAgents
-            configured={configuredBackend ?? KIRO_BACKEND}
-            backends={backendsQuery.data?.backends ?? []}
-            loading={backendsQuery.isPending && backendsQuery.fetchStatus !== 'idle'}
-            failed={backendsQuery.isError}
-            onShowingAgentsChange={setOtherAgentsOpen}
-          />
-
-          {!otherAgentsOpen && (
-            <div className="flex items-center justify-between gap-4 border-t border-border pt-5">
-              {/* Installed: the state now leads the card, so the footer stays
-                  empty rather than repeating it. The element is kept so Check
-                  again stays right-aligned. */}
-              <p className="text-[13px] text-muted" aria-live="polite">
-                {status.installed
-                  ? null
-                  : i18nT('components.kiroPrerequisiteGate.kiro_cli_is_required_on_the_gateway_host', { platform })}
-              </p>
+            {/* The card owns its Check again, the way each other agent's panel
+                owns its own: the action sits with the thing it re-checks, not
+                in a page footer that read as Kiro-only once other agents were
+                on screen. */}
+            <div className="mt-4 flex items-center gap-2">
               <SendBtn
                 type="button"
                 className="inline-flex items-center gap-1.5"
@@ -1669,7 +1652,14 @@ export default function KiroPrerequisiteGate({ children }: { children: ReactNode
                 {i18nT('components.kiroPrerequisiteGate.check_again')}
               </SendBtn>
             </div>
-          )}
+          </Card>
+
+          <OtherCodingAgents
+            configured={configuredBackend ?? KIRO_BACKEND}
+            backends={backendsQuery.data?.backends ?? []}
+            loading={backendsQuery.isPending && backendsQuery.fetchStatus !== 'idle'}
+            failed={backendsQuery.isError}
+          />
         </>
     </SetupShell>
   )
